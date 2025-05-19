@@ -9,6 +9,7 @@ rust-version = "1.88"
 [dependencies]
 clap = { version = "4.5.38", features = ["derive"] }
 color-eyre = "0.6.4"
+serde = "1.0.219"
 sophia = "0.9.0"
 
 [dev-dependencies]

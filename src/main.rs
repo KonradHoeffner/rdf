@@ -3,12 +3,14 @@ use color_eyre::config::HookBuilder;
 use color_eyre::eyre::{Report, WrapErr};
 //use hdt::{Hdt, HdtGraph};
 //use log::info;
-//use sophia::api::prelude::{Stringifier, TripleSerializer};
-//use sophia::turtle::serializer::nt::NtSerializer;
-//use sophia::turtle::serializer::turtle::{TurtleConfig, TurtleSerializer};
+use sophia::api::prelude::{Stringifier, TripleSerializer};
+use sophia::turtle::serializer::nt::NtSerializer;
+use sophia::turtle::serializer::turtle::{TurtleConfig, TurtleSerializer};
 //use sophia::turtle::parser::{nt, turtle};
 use sophia::api::graph::Graph;
-use sophia::api::prelude::{Triple, TripleSource};
+use sophia::api::prelude::TripleSource;
+//use sophia::api::prelude::{Triple, TripleSource};
+use serde::Serialize;
 use sophia::inmem::graph::FastGraph;
 use sophia::turtle::parser::turtle;
 use std::fs::File;
@@ -27,8 +29,8 @@ use std::io::BufReader;
 struct Cli {
     #[command(subcommand)]
     command: Command,
-    //#[arg(short, long)]
-    //count: u8,
+    #[arg(short, long)]
+    quiet: bool,
     /*    // /// RDF Format of the output
         //format: Format,
         #[arg(short, long)]
@@ -48,8 +50,30 @@ struct Cli {
     */
 }
 
+#[derive(Debug, Clone, clap::ValueEnum, Default, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum Serializer {
+    /// RDF/XML
+    Rdfxml,
+    /// Turtle Terse RDF Triple Language
+    Turtle,
+    Jsonld,
+    /// N-Triples
+    #[default]
+    Ntriples,
+}
+
 #[derive(Subcommand)]
 enum Command {
+    Convert {
+        input_uri: String,
+        /// Set the input format.
+        #[arg(short, long)]
+        input: Option<String>,
+        /// Set the output format.
+        #[arg(short, long)]
+        output: Serializer,
+    },
     Info {
         //#[arg(short, long)]
         //count: u8,
@@ -61,6 +85,7 @@ enum Command {
 //fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn main() -> Result<(), Report> {
     use Command::*;
+    use Serializer::*;
     let cli = Cli::parse();
     HookBuilder::default()
         .panic_section("consider reporting the bug at https://github.com/KonradHoeffner/rdf/issues")
@@ -75,6 +100,53 @@ fn main() -> Result<(), Report> {
             let triples = turtle::parse_bufread(br).collect_triples();
             let graph: FastGraph = triples?;
             println!("~ {} triples", graph.triples().size_hint().0);
+        }
+        Convert {
+            input_uri,
+            input,
+            output,
+        } => {
+            if !cli.quiet {
+                eprintln!("rdf: Parsing URI {} with parser turtle", input_uri);
+            }
+            let file = File::open(input_uri.clone())
+                .wrap_err_with(|| format!("Error opening input URI {}", input_uri))?;
+            let br = BufReader::new(file);
+            let triples = turtle::parse_bufread(br).collect_triples();
+            let graph: FastGraph = triples?;
+            if !cli.quiet {
+                eprintln!("rdf: Serializing with serializer {output:?}");
+            }
+            match output {
+                Ntriples => {
+                    println!(
+                        "{}",
+                        NtSerializer::new_stringifier()
+                            .serialize_graph(&graph)?
+                            .to_string()
+                    );
+                }
+                Turtle => {
+                    let config = TurtleConfig::new().with_pretty(true);
+                    //.with_own_prefix_map(prefixes().clone());
+                    println!(
+                        "{}",
+                        TurtleSerializer::new_stringifier_with_config(config)
+                            .serialize_graph(&graph)
+                            .wrap_err("error serializing graph as RDF Turtle")?
+                            .to_string()
+                    );
+                }
+                _ => {
+                    panic!("unsupported serializer {output:?}");
+                }
+            }
+            if !cli.quiet {
+                eprintln!(
+                    "rdf: Converting returned {} triples",
+                    graph.triples().size_hint().0
+                );
+            }
         }
     }
     //env_logger::init();
